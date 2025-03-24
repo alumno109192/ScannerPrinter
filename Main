@@ -1,0 +1,161 @@
+import sys
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QLabel, QFileDialog, QComboBox, QMessageBox
+)
+from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtCore import Qt
+import sane
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from PIL import Image
+from zeroconf import ServiceBrowser, Zeroconf, ServiceInfo
+
+class ScannerApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+        self.initScanner()
+        self.initZeroConf()
+
+    def initUI(self):
+        # Configuración de la ventana principal
+        self.setWindowTitle("Aplicación de Escaneo")
+        self.setGeometry(100, 100, 800, 500)
+
+        # Layout principal
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        layout = QHBoxLayout(main_widget)
+
+        # Zona de previsualización (izquierda)
+        self.preview_label = QLabel("Previsualización")
+        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setStyleSheet("border: 2px solid black;")
+        layout.addWidget(self.preview_label)
+
+        # Botones y lista de dispositivos (derecha)
+        button_layout = QVBoxLayout()
+        self.scan_devices_button = QPushButton("Escanear Dispositivos")
+        self.devices_combo = QComboBox()
+        self.scan_button = QPushButton("Escanear Documento")
+        self.view_button = QPushButton("Visualizar Escaneo")
+        self.save_button = QPushButton("Guardar como PDF")
+        button_layout.addWidget(self.scan_devices_button)
+        button_layout.addWidget(self.devices_combo)
+        button_layout.addWidget(self.scan_button)
+        button_layout.addWidget(self.view_button)
+        button_layout.addWidget(self.save_button)
+        layout.addLayout(button_layout)
+
+        # Conectar botones a funciones
+        self.scan_devices_button.clicked.connect(self.scanNetworkDevices)
+        self.scan_button.clicked.connect(self.scanDocument)
+        self.view_button.clicked.connect(self.viewScannedDocument)
+        self.save_button.clicked.connect(self.saveAsPDF)
+
+        # Variables para almacenar la imagen escaneada y dispositivos
+        self.scanned_image = None
+        self.devices = []
+        self.selected_device = None
+
+    def initScanner(self):
+        # Inicializar el escáner
+        sane.init()
+        self.scanner = None
+
+    def initZeroConf(self):
+        # Inicializar ZeroConf para descubrir dispositivos en la red
+        self.zeroconf = Zeroconf()
+        self.listener = MyListener(self)
+        self.browser = ServiceBrowser(self.zeroconf, "_ipp._tcp.local.", self.listener)
+
+    def scanNetworkDevices(self):
+        # Escanear dispositivos en la red
+        self.devices_combo.clear()
+        self.devices = []
+        print("Escaneando dispositivos en la red...")
+        QMessageBox.information(self, "Escaneo", "Escaneando dispositivos en la red...")
+
+    def scanDocument(self):
+        # Escanear el documento
+        self.selected_device = self.devices_combo.currentText()
+        if not self.selected_device:
+            QMessageBox.warning(self, "Error", "No se ha seleccionado ningún dispositivo.")
+            return
+
+        # Aquí puedes agregar la lógica para conectar y usar el dispositivo seleccionado
+        print(f"Escaneando con el dispositivo: {self.selected_device}")
+        try:
+            devices = sane.get_devices()
+            if not devices:
+                QMessageBox.warning(self, "Error", "No se encontraron escáneres conectados.")
+                return
+            self.scanner = sane.open(devices[0][0])
+            self.scanner.resolution = 300  # Configurar resolución
+            self.scanned_image = self.scanner.scan()
+            self.showPreview(self.scanned_image)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo escanear: {str(e)}")
+
+    def showPreview(self, image):
+        # Mostrar la imagen escaneada en la previsualización
+        qimage = QImage(
+            image.tobytes(), image.size[0], image.size[1], QImage.Format_RGB888
+        )
+        pixmap = QPixmap.fromImage(qimage)
+        self.preview_label.setPixmap(pixmap.scaled(
+            self.preview_label.width(), self.preview_label.height(), Qt.KeepAspectRatio
+        ))
+
+    def viewScannedDocument(self):
+        # Visualizar la imagen escaneada en una nueva ventana
+        if self.scanned_image:
+            self.scanned_image.show()
+        else:
+            QMessageBox.warning(self, "Error", "No hay ningún documento escaneado.")
+
+    def saveAsPDF(self):
+        # Guardar la imagen escaneada como PDF
+        if not self.scanned_image:
+            QMessageBox.warning(self, "Error", "No hay ningún documento escaneado.")
+            return
+
+        # Seleccionar la ruta para guardar el archivo
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar como PDF", "", "PDF Files (*.pdf)"
+        )
+        if file_path:
+            # Convertir la imagen escaneada a PDF
+            pdf = canvas.Canvas(file_path, pagesize=A4)
+            pdf.drawImage(self.scanned_image, 0, 0, width=A4[0], height=A4[1])
+            pdf.save()
+            QMessageBox.information(self, "Guardado", f"Documento guardado como {file_path}")
+
+    def closeEvent(self, event):
+        # Cerrar el escáner y ZeroConf al salir
+        if self.scanner:
+            self.scanner.close()
+        self.zeroconf.close()
+        event.accept()
+
+class MyListener:
+    def __init__(self, app):
+        self.app = app
+
+    def add_service(self, zeroconf, type, name):
+        info = zeroconf.get_service_info(type, name)
+        if info:
+            device_name = info.name
+            self.app.devices.append(device_name)
+            self.app.devices_combo.addItem(device_name)
+            print(f"Dispositivo encontrado: {device_name}")
+
+    def remove_service(self, zeroconf, type, name):
+        print(f"Dispositivo desconectado: {name}")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = ScannerApp()
+    window.show()
+    sys.exit(app.exec_())
