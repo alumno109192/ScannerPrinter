@@ -1,22 +1,26 @@
 import sys
+import json
+import time
+import threading
+import requests  # Para manejar solicitudes HTTP a dispositivos eSCL
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QFileDialog, QComboBox, QMessageBox
+    QPushButton, QLabel, QFileDialog, QComboBox, QMessageBox, QDialog
 )
-from PyQt5.QtGui import QPixmap, QImage
-from PyQt5.QtCore import Qt
-import sane_python as sane
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from PIL import Image
+from PyQt5.QtGui import QPixmap, QImage, QMovie
+from PyQt5.QtCore import Qt, QTimer, QMetaObject, QThread, Q_ARG, pyqtSlot
 from zeroconf import ServiceBrowser, Zeroconf, ServiceInfo
+
+
+DEVICE_FILE = "devices.json"  # Archivo para guardar los dispositivos detectados
+
 
 class ScannerApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.initUI()
-        self.initScanner()
         self.initZeroConf()
+        self.loadDevices()
 
     def initUI(self):
         # Configuración de la ventana principal
@@ -57,87 +61,234 @@ class ScannerApp(QMainWindow):
         # Variables para almacenar la imagen escaneada y dispositivos
         self.scanned_image = None
         self.devices = []
-        self.selected_device = None
-
-    def initScanner(self):
-        # Inicializar el escáner
-        sane.init()
-        self.scanner = None
 
     def initZeroConf(self):
         # Inicializar ZeroConf para descubrir dispositivos en la red
         self.zeroconf = Zeroconf()
         self.listener = MyListener(self)
-        self.browser = ServiceBrowser(self.zeroconf, "_ipp._tcp.local.", self.listener)
+        self.browser_ipp = ServiceBrowser(self.zeroconf, "_ipp._tcp.local.", self.listener)  # eSCL
+
+    def loadDevices(self):
+        # Cargar dispositivos desde el archivo JSON
+        try:
+            with open(DEVICE_FILE, "r") as file:
+                self.devices = json.load(file)
+                for device in self.devices:
+                    self.devices_combo.addItem(f"{device['name']} ({device['type']})")
+        except FileNotFoundError:
+            self.devices = []
+
+    def saveDevices(self):
+        # Guardar dispositivos en el archivo JSON
+        with open(DEVICE_FILE, "w") as file:
+            json.dump(self.devices, file, indent=4)
 
     def scanNetworkDevices(self):
-        # Escanear dispositivos en la red
+        # Mostrar ventana de espera mientras se escanean dispositivos
+        dialog = ScanDialog(self)
+        dialog.exec_()
+
+        # Agregar dispositivos encontrados al desplegable
         self.devices_combo.clear()
-        self.devices = []
-        print("Escaneando dispositivos en la red...")
-        QMessageBox.information(self, "Escaneo", "Escaneando dispositivos en la red...")
+        for device in self.devices:
+            self.devices_combo.addItem(f"{device['name']} ({device['type']})")
 
     def scanDocument(self):
         # Escanear el documento
-        self.selected_device = self.devices_combo.currentText()
-        if not self.selected_device:
+        selected_index = self.devices_combo.currentIndex()
+        if selected_index == -1:
             QMessageBox.warning(self, "Error", "No se ha seleccionado ningún dispositivo.")
             return
 
-        # Aquí puedes agregar la lógica para conectar y usar el dispositivo seleccionado
-        print(f"Escaneando con el dispositivo: {self.selected_device}")
-        try:
-            devices = sane.get_devices()
-            if not devices:
-                QMessageBox.warning(self, "Error", "No se encontraron escáneres conectados.")
-                return
-            self.scanner = sane.open(devices[0][0])
-            self.scanner.resolution = 300  # Configurar resolución
-            self.scanned_image = self.scanner.scan()
-            self.showPreview(self.scanned_image)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo escanear: {str(e)}")
-
-    def showPreview(self, image):
-        # Mostrar la imagen escaneada en la previsualización
-        qimage = QImage(
-            image.tobytes(), image.size[0], image.size[1], QImage.Format_RGB888
-        )
-        pixmap = QPixmap.fromImage(qimage)
-        self.preview_label.setPixmap(pixmap.scaled(
-            self.preview_label.width(), self.preview_label.height(), Qt.KeepAspectRatio
-        ))
-
-    def viewScannedDocument(self):
-        # Visualizar la imagen escaneada en una nueva ventana
-        if self.scanned_image:
-            self.scanned_image.show()
-        else:
-            QMessageBox.warning(self, "Error", "No hay ningún documento escaneado.")
-
-    def saveAsPDF(self):
-        # Guardar la imagen escaneada como PDF
-        if not self.scanned_image:
-            QMessageBox.warning(self, "Error", "No hay ningún documento escaneado.")
+        selected_device = self.devices[selected_index]
+        if selected_device["type"] != "eSCL":
+            QMessageBox.warning(self, "Error", "El dispositivo seleccionado no es compatible con eSCL.")
             return
 
-        # Seleccionar la ruta para guardar el archivo
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Guardar como PDF", "", "PDF Files (*.pdf)"
-        )
-        if file_path:
-            # Convertir la imagen escaneada a PDF
-            pdf = canvas.Canvas(file_path, pagesize=A4)
-            pdf.drawImage(self.scanned_image, 0, 0, width=A4[0], height=A4[1])
+        print(f"Escaneando con el dispositivo: {selected_device['name']} ({selected_device['type']})")
+
+        # Mostrar ventana de espera mientras se realiza el escaneo
+        dialog = ScanWaitDialog(self, selected_device)
+        dialog.exec_()
+
+    def viewScannedDocument(self):
+        # Mostrar la imagen escaneada en la etiqueta de previsualización
+        if self.scanned_image is None:
+            QMessageBox.warning(self, "Error", "No hay ninguna imagen escaneada para visualizar.")
+            return
+
+        pixmap = QPixmap.fromImage(self.scanned_image)
+        self.preview_label.setPixmap(pixmap)
+        self.preview_label.setScaledContents(True)
+
+    def saveAsPDF(self):
+        # Guardar la imagen escaneada como un archivo PDF
+        if self.scanned_image is None:
+            QMessageBox.warning(self, "Error", "No hay ninguna imagen escaneada para guardar.")
+            return
+
+        # Seleccionar ubicación para guardar el archivo PDF
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getSaveFileName(self, "Guardar como PDF", "", "PDF Files (*.pdf)", options=options)
+
+        if not file_path:
+            return  # El usuario canceló la operación
+
+        # Crear un archivo PDF con la imagen escaneada
+        from reportlab.pdfgen import canvas
+        from PIL.ImageQt import ImageQt
+        from PIL import Image
+
+        try:
+            # Convertir QImage a PIL Image
+            image = ImageQt(self.scanned_image)
+            pil_image = Image.fromqpixmap(image)
+
+            # Crear el PDF
+            pdf = canvas.Canvas(file_path)
+            pdf.drawImage(pil_image, 0, 0, width=pil_image.width, height=pil_image.height)
             pdf.save()
-            QMessageBox.information(self, "Guardado", f"Documento guardado como {file_path}")
+
+            QMessageBox.information(self, "Éxito", f"El archivo PDF se guardó correctamente en: {file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo guardar el archivo PDF: {str(e)}")
 
     def closeEvent(self, event):
-        # Cerrar el escáner y ZeroConf al salir
-        if self.scanner:
-            self.scanner.close()
+        # Cerrar ZeroConf al salir y guardar dispositivos
         self.zeroconf.close()
+        self.saveDevices()
         event.accept()
+
+    @pyqtSlot(QImage)
+    def updatePreview(self, scanned_image):
+        # Actualizar la previsualización con la imagen escaneada
+        self.scanned_image = scanned_image
+        self.viewScannedDocument()
+
+    @pyqtSlot(str)
+    def showError(self, error_message):
+        QMessageBox.critical(self, "Error de escaneo", error_message)
+
+
+class ScanDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Escaneando dispositivos...")
+        self.setModal(True)
+        self.setGeometry(200, 200, 400, 300)
+
+        # Layout principal
+        layout = QVBoxLayout(self)
+
+        # GIF de espera
+        self.gif_label = QLabel(self)
+        self.gif_label.setAlignment(Qt.AlignCenter)
+        self.movie = QMovie("loading.gif")  # Asegúrate de tener un archivo GIF llamado "loading.gif"
+        self.gif_label.setMovie(self.movie)
+        self.movie.start()
+        layout.addWidget(self.gif_label)
+
+        # Botones
+        button_layout = QHBoxLayout()
+        self.close_button = QPushButton("Cerrar")
+        self.wait_button = QPushButton("Esperar")
+        button_layout.addWidget(self.close_button)
+        button_layout.addWidget(self.wait_button)
+        layout.addLayout(button_layout)
+
+        # Conectar botones
+        self.close_button.clicked.connect(self.reject)
+        self.wait_button.clicked.connect(self.waitForScan)
+
+        # Simular escaneo
+        QTimer.singleShot(5000, self.finishScan)  # Simular un escaneo de 5 segundos
+
+    def waitForScan(self):
+        # Mantener la ventana abierta
+        pass
+
+    def finishScan(self):
+        # Simular dispositivos encontrados
+        self.parent().devices = [
+            {"name": "HP_OfficeJet_Pro", "type": "eSCL", "address": "192.168.1.100:631"},
+            {"name": "Canon_MX920", "type": "WSD", "address": "192.168.1.101:80"}
+        ]
+        QMessageBox.information(self, "Escaneo completado", "Se encontraron dispositivos en la red.")
+        self.accept()
+
+
+class ScanWaitDialog(QDialog):
+    def __init__(self, parent, device):
+        super().__init__(parent)
+        self.setWindowTitle("Escaneando documento...")
+        self.setModal(True)
+        self.setGeometry(200, 200, 400, 300)
+
+        # Layout principal
+        layout = QVBoxLayout(self)
+
+        # GIF de espera
+        self.gif_label = QLabel(self)
+        self.gif_label.setAlignment(Qt.AlignCenter)
+        self.movie = QMovie("loading.gif")  # Asegúrate de tener un archivo GIF llamado "loading.gif"
+        self.gif_label.setMovie(self.movie)
+        self.movie.start()
+        layout.addWidget(self.gif_label)
+
+        # Inicializar variables
+        self.device = device
+        self.parent = parent
+
+        # Iniciar el escaneo en un hilo separado
+        self.scan_thread = threading.Thread(target=self.startScan)
+        self.scan_thread.start()
+
+    def startScan(self):
+        try:
+            # Realizar una solicitud HTTP al dispositivo eSCL para iniciar el escaneo
+            url = f"http://{self.device['address']}/eSCL/ScanJobs"
+            headers = {"Content-Type": "application/xml"}
+            body = """<scan:ScanJob xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03">
+                        <scan:InputSource>Platen</scan:InputSource>
+                        <scan:DocumentFormat>image/jpeg</scan:DocumentFormat>
+                      </scan:ScanJob>"""
+            response = requests.post(url, headers=headers, data=body)
+
+            if response.status_code != 201:
+                raise Exception(f"Error al iniciar el escaneo: {response.status_code}")
+
+            # Obtener la URL del trabajo de escaneo
+            job_url = response.headers["Location"]
+
+            # Agregar un tiempo de espera de 30 segundos antes de descargar la imagen
+            time.sleep(30)
+
+            # Descargar la imagen escaneada
+            self.downloadScannedImage(job_url)
+        except Exception as e:
+            # Mostrar un mensaje de error si ocurre un problema
+            QMetaObject.invokeMethod(self.parent, "showError", Qt.QueuedConnection, Q_ARG(str, str(e)))
+        finally:
+            # Cerrar el diálogo en el hilo principal
+            QMetaObject.invokeMethod(self, "accept", Qt.QueuedConnection)
+
+    def downloadScannedImage(self, job_url):
+        try:
+            # Descargar la imagen escaneada
+            image_response = requests.get(f"{job_url}/NextDocument")
+            if image_response.status_code != 200:
+                raise Exception("Error al descargar la imagen escaneada.")
+
+            # Convertir la imagen a QImage
+            qimage = QImage()
+            qimage.loadFromData(image_response.content)
+
+            # Actualizar la previsualización en el hilo principal
+            QMetaObject.invokeMethod(self.parent, "updatePreview", Qt.QueuedConnection, Q_ARG(QImage, qimage))
+        except Exception as e:
+            # Mostrar un mensaje de error si ocurre un problema
+            QMetaObject.invokeMethod(self.parent, "showError", Qt.QueuedConnection, Q_ARG(str, str(e)))
+
 
 class MyListener:
     def __init__(self, app):
@@ -146,13 +297,28 @@ class MyListener:
     def add_service(self, zeroconf, type, name):
         info = zeroconf.get_service_info(type, name)
         if info:
-            device_name = info.name
-            self.app.devices.append(device_name)
-            self.app.devices_combo.addItem(device_name)
-            print(f"Dispositivo encontrado: {device_name}")
+            device_name = info.name.split(".")[0]
+            device_address = f"{info.parsed_scoped_addresses()[0]}:{info.port}"
+            device_type = "eSCL"
+
+            # Evitar duplicados
+            for device in self.app.devices:
+                if device["name"] == device_name and device["type"] == device_type:
+                    return
+
+            # Agregar dispositivo a la lista
+            new_device = {"name": device_name, "type": device_type, "address": device_address}
+            self.app.devices.append(new_device)
+            self.app.devices_combo.addItem(f"{device_name} ({device_type})")
+            print(f"Dispositivo encontrado: {device_name} ({device_type}) - {device_address}")
 
     def remove_service(self, zeroconf, type, name):
         print(f"Dispositivo desconectado: {name}")
+
+    def update_service(self, zeroconf, type, name):
+        # Método vacío para manejar actualizaciones de servicios
+        print(f"Servicio actualizado: {name}")
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
