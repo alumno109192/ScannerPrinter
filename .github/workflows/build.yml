@@ -1,0 +1,26 @@
+name: Build Windows EXE
+on: [push]  # Se activa al hacer push al repositorio
+
+jobs:
+  build-exe:
+    runs-on: windows-latest  # Entorno Windows
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4  # Descarga tu código
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"  # Versión de Python
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller  # Instala dependencias
+
+      - name: Build EXE
+        run: pyinstaller --onefile tu_script.py  # Compila el .exe
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v3
+        with:
+          name: ejecutable-windows
+          path: dist/  # Sube el .exe como artefacto
