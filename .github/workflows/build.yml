@@ -17,7 +17,7 @@ jobs:
         run: pip install pyinstaller  # Instala dependencias
 
       - name: Build EXE
-        run: pyinstaller --onefile tu_script.py  # Compila el .exe
+        run: pyinstaller --onefile Main.py  # Compila el .exe
 
       - name: Upload EXE
         uses: actions/upload-artifact@v3
