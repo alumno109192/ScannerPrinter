@@ -23,6 +23,10 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install pyinstaller requests PyQt5 zeroconf pillow reportlab
 
+    - name: Clean previous builds
+      run: |
+        rm -rf build dist Main.spec
+
     - name: Build executable
       run: |
         pyinstaller --onefile --windowed --hidden-import requests --hidden-import zeroconf --hidden-import pillow --hidden-import reportlab Main.py
