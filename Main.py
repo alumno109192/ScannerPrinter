@@ -46,9 +46,10 @@ class ScannerApp(QMainWindow):
         self.view_button = QPushButton("Visualizar Escaneo")
         self.save_button = QPushButton("Guardar como PDF")
         button_layout.addWidget(self.scan_devices_button)
+        
         button_layout.addWidget(self.devices_combo)
         button_layout.addWidget(self.scan_button)
-        button_layout.addWidget(self.view_button)
+        #button_layout.addWidget(self.view_button)
         button_layout.addWidget(self.save_button)
         layout.addLayout(button_layout)
 
@@ -117,9 +118,18 @@ class ScannerApp(QMainWindow):
             QMessageBox.warning(self, "Error", "No hay ninguna imagen escaneada para visualizar.")
             return
 
+        # Convertir QImage a QPixmap
         pixmap = QPixmap.fromImage(self.scanned_image)
-        self.preview_label.setPixmap(pixmap)
-        self.preview_label.setScaledContents(True)
+
+        # Ajustar el pixmap al tamaño del área de previsualización manteniendo la relación de aspecto
+        scaled_pixmap = pixmap.scaled(
+            self.preview_label.size(),  # Tamaño del área de previsualización
+            Qt.KeepAspectRatio,        # Mantener la relación de aspecto
+            Qt.SmoothTransformation    # Usar una transformación suave para escalar
+        )
+
+        # Establecer el pixmap escalado en la etiqueta de previsualización
+        self.preview_label.setPixmap(scaled_pixmap)
 
     def saveAsPDF(self):
         # Guardar la imagen escaneada como un archivo PDF
@@ -136,22 +146,31 @@ class ScannerApp(QMainWindow):
 
         # Crear un archivo PDF con la imagen escaneada
         from reportlab.pdfgen import canvas
-        from PIL.ImageQt import ImageQt
         from PIL import Image
+        import tempfile
 
         try:
-            # Convertir QImage a PIL Image
-            image = ImageQt(self.scanned_image)
-            pil_image = Image.fromqpixmap(image)
+            # Guardar QImage como un archivo temporal
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+                temp_file_name = temp_file.name
+                self.scanned_image.save(temp_file_name, "PNG")  # Guardar QImage como PNG
+
+            # Abrir el archivo temporal con Pillow
+            pil_image = Image.open(temp_file_name)
 
             # Crear el PDF
             pdf = canvas.Canvas(file_path)
-            pdf.drawImage(pil_image, 0, 0, width=pil_image.width, height=pil_image.height)
+            pdf.drawImage(temp_file_name, 0, 0, width=pil_image.width, height=pil_image.height)
             pdf.save()
 
             QMessageBox.information(self, "Éxito", f"El archivo PDF se guardó correctamente en: {file_path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo guardar el archivo PDF: {str(e)}")
+        finally:
+            # Eliminar el archivo temporal
+            import os
+            if os.path.exists(temp_file_name):
+                os.remove(temp_file_name)
 
     def closeEvent(self, event):
         # Cerrar ZeroConf al salir y guardar dispositivos
