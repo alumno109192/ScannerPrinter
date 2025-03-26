@@ -28,7 +28,7 @@ jobs:
         pyinstaller --onefile --windowed --hidden-import requests --hidden-import zeroconf --hidden-import pillow --hidden-import reportlab Main.py
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ScannerPrinter
         path: dist/Main.exe
