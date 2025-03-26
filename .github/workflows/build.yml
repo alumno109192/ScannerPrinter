@@ -25,7 +25,7 @@ jobs:
 
     - name: Clean previous builds
       run: |
-        rm -rf build dist Main.spec
+        rm build dist Main.spec
 
     - name: Build executable
       run: |
