@@ -8,8 +8,8 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QFileDialog, QComboBox, QMessageBox, QDialog
 )
 from PyQt5.QtGui import QPixmap, QImage, QMovie
-from PyQt5.QtCore import Qt, QTimer, QMetaObject, QThread, Q_ARG, pyqtSlot
-from zeroconf import ServiceBrowser, Zeroconf, ServiceInfo
+from PyQt5.QtCore import Qt, QTimer, QMetaObject, Q_ARG, pyqtSlot
+from zeroconf import ServiceBrowser, Zeroconf
 
 
 DEVICE_FILE = "devices.json"  # Archivo para guardar los dispositivos detectados
