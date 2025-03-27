@@ -25,7 +25,7 @@ jobs:
 
     - name: Clean previous builds
       run: |
-        Remove-Item -Recurse -Force build, dist, Main.spec
+        Remove-Item -Recurse -Force build, dist, Main.spec -ErrorAction SilentlyContinue
 
     - name: Build executable
       run: |
