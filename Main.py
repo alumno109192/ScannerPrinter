@@ -148,6 +148,9 @@ class ScannerApp(QMainWindow):
         from reportlab.pdfgen import canvas
         from PIL import Image
         import tempfile
+        import os
+
+        temp_file_name = None  # Inicializar la variable para el archivo temporal
 
         try:
             # Guardar QImage como un archivo temporal
@@ -165,11 +168,11 @@ class ScannerApp(QMainWindow):
 
             QMessageBox.information(self, "Éxito", f"El archivo PDF se guardó correctamente en: {file_path}")
         except Exception as e:
+            # Mostrar un mensaje de error si ocurre un problema
             QMessageBox.critical(self, "Error", f"No se pudo guardar el archivo PDF: {str(e)}")
         finally:
-            # Eliminar el archivo temporal
-            import os
-            if os.path.exists(temp_file_name):
+            # Eliminar el archivo temporal si existe
+            if temp_file_name and os.path.exists(temp_file_name):
                 os.remove(temp_file_name)
 
     def closeEvent(self, event):
