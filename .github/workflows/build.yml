@@ -29,7 +29,7 @@ jobs:
 
     - name: Build executable
       run: |
-        pyinstaller --onefile --windowed --hidden-import requests --hidden-import zeroconf --hidden-import pillow --hidden-import reportlab Main.py
+        pyinstaller --onefile --windowed --hidden-import requests --hidden-import zeroconf --hidden-import zeroconf._utils.ipaddress --hidden-import zeroconf._core --hidden-import zeroconf._engine --hidden-import zeroconf._services.info --hidden-import pillow --hidden-import reportlab Main.py
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
