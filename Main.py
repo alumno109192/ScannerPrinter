@@ -22,6 +22,9 @@ class ScannerApp(QMainWindow):
         self.initZeroConf()
         self.loadDevices()
 
+        # Verificar actualizaciones al iniciar la aplicación
+        self.checkForUpdates()
+
     def initUI(self):
         # Configuración de la ventana principal
         self.setWindowTitle("Aplicación de Escaneo")
@@ -45,12 +48,14 @@ class ScannerApp(QMainWindow):
         self.scan_button = QPushButton("Escanear Documento")
         self.view_button = QPushButton("Visualizar Escaneo")
         self.save_button = QPushButton("Guardar como PDF")
+        self.update_button = QPushButton("Buscar Actualizaciones")
         button_layout.addWidget(self.scan_devices_button)
         
         button_layout.addWidget(self.devices_combo)
         button_layout.addWidget(self.scan_button)
         #button_layout.addWidget(self.view_button)
         button_layout.addWidget(self.save_button)
+        button_layout.addWidget(self.update_button)
         layout.addLayout(button_layout)
 
         # Conectar botones a funciones
@@ -58,6 +63,7 @@ class ScannerApp(QMainWindow):
         self.scan_button.clicked.connect(self.scanDocument)
         self.view_button.clicked.connect(self.viewScannedDocument)
         self.save_button.clicked.connect(self.saveAsPDF)
+        self.update_button.clicked.connect(self.checkForUpdates)
 
         # Variables para almacenar la imagen escaneada y dispositivos
         self.scanned_image = None
@@ -174,6 +180,38 @@ class ScannerApp(QMainWindow):
             # Eliminar el archivo temporal si existe
             if temp_file_name and os.path.exists(temp_file_name):
                 os.remove(temp_file_name)
+
+    def checkForUpdates(self):
+        try:
+            # URL del archivo version.json en tu repositorio
+            version_url = "https://raw.githubusercontent.com/tu-usuario/tu-repositorio/main/version.json"
+
+            # Descargar la información de la versión
+            response = requests.get(version_url)
+            if response.status_code != 200:
+                raise Exception("No se pudo verificar la versión más reciente.")
+
+            # Leer la versión más reciente
+            latest_version_info = response.json()
+            latest_version = latest_version_info["version"]
+            download_url = latest_version_info["download_url"]
+
+            # Comparar con la versión actual
+            current_version = "1.0.0"  # Cambia esto por la versión actual de tu aplicación
+            if latest_version != current_version:
+                # Mostrar un mensaje al usuario
+                reply = QMessageBox.question(
+                    self,
+                    "Actualización disponible",
+                    f"Hay una nueva versión disponible ({latest_version}). ¿Deseas descargarla?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    # Abrir el enlace de descarga en el navegador
+                    import webbrowser
+                    webbrowser.open(download_url)
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"No se pudo verificar actualizaciones: {str(e)}")
 
     def closeEvent(self, event):
         # Cerrar ZeroConf al salir y guardar dispositivos
