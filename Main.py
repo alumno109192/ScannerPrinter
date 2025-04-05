@@ -138,46 +138,50 @@ class ScannerApp(QMainWindow):
         self.preview_label.setPixmap(scaled_pixmap)
 
     def saveAsPDF(self):
-        # Guardar la imagen escaneada como un archivo PDF
         if self.scanned_image is None:
             QMessageBox.warning(self, "Error", "No hay ninguna imagen escaneada para guardar.")
             return
 
-        # Seleccionar ubicación para guardar el archivo PDF
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getSaveFileName(self, "Guardar como PDF", "", "PDF Files (*.pdf)", options=options)
 
         if not file_path:
-            return  # El usuario canceló la operación
+            return
 
-        # Crear un archivo PDF con la imagen escaneada
         from reportlab.pdfgen import canvas
+        from reportlab.lib.units import inch
         from PIL import Image
         import tempfile
         import os
 
-        temp_file_name = None  # Inicializar la variable para el archivo temporal
+        temp_file_name = None
 
         try:
-            # Guardar QImage como un archivo temporal
+            # Guardar QImage como archivo temporal
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
                 temp_file_name = temp_file.name
-                self.scanned_image.save(temp_file_name, "PNG")  # Guardar QImage como PNG
+                self.scanned_image.save(temp_file_name, "PNG")
 
-            # Abrir el archivo temporal con Pillow
+            # Abrir imagen con Pillow
             pil_image = Image.open(temp_file_name)
+            img_width, img_height = pil_image.size
+            
+            # Calcular dimensiones para el PDF (convertir píxeles a puntos)
+            aspect = img_height / float(img_width)
+            # Usar un ancho fijo de 8 pulgadas y ajustar altura proporcionalmente
+            pdf_width = 8 * inch
+            pdf_height = pdf_width * aspect
 
-            # Crear el PDF
-            pdf = canvas.Canvas(file_path)
-            pdf.drawImage(temp_file_name, 0, 0, width=pil_image.width, height=pil_image.height)
-            pdf.save()
+            # Crear el PDF con las dimensiones calculadas
+            c = canvas.Canvas(file_path, pagesize=(pdf_width, pdf_height))
+            # Dibujar la imagen usando todo el espacio disponible
+            c.drawImage(temp_file_name, 0, 0, width=pdf_width, height=pdf_height)
+            c.save()
 
             QMessageBox.information(self, "Éxito", f"El archivo PDF se guardó correctamente en: {file_path}")
         except Exception as e:
-            # Mostrar un mensaje de error si ocurre un problema
             QMessageBox.critical(self, "Error", f"No se pudo guardar el archivo PDF: {str(e)}")
         finally:
-            # Eliminar el archivo temporal si existe
             if temp_file_name and os.path.exists(temp_file_name):
                 os.remove(temp_file_name)
 
