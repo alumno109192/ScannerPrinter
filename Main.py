@@ -10,7 +10,17 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QPixmap, QImage, QMovie
 from PyQt5.QtCore import Qt, QTimer, QMetaObject, Q_ARG, pyqtSlot
 from zeroconf import ServiceBrowser, Zeroconf
+import logging
 
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('scanner_app.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 DEVICE_FILE = "devices.json"  # Archivo para guardar los dispositivos detectados
 
@@ -142,48 +152,76 @@ class ScannerApp(QMainWindow):
             QMessageBox.warning(self, "Error", "No hay ninguna imagen escaneada para guardar.")
             return
 
-        options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getSaveFileName(self, "Guardar como PDF", "", "PDF Files (*.pdf)", options=options)
-
-        if not file_path:
-            return
-
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.units import inch
-        from PIL import Image
-        import tempfile
-        import os
-
-        temp_file_name = None
-
         try:
+            options = QFileDialog.Options()
+            file_path, _ = QFileDialog.getSaveFileName(self, "Guardar como PDF", "", "PDF Files (*.pdf)", options=options)
+
+            if not file_path:
+                return
+
+            # Importar librerías necesarias
+            from reportlab.pdfgen import canvas
+            from reportlab.lib.pagesizes import letter
+            from reportlab.lib.utils import ImageReader
+            from PIL import Image
+            import tempfile
+            import os
+
+            temp_file_name = None
+
+            # Crear un directorio temporal si no existe
+            temp_dir = tempfile.gettempdir()
+            temp_file_name = os.path.join(temp_dir, "temp_scan.png")
+
+            logger.debug(f"Guardando imagen temporal en: {temp_file_name}")
             # Guardar QImage como archivo temporal
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
-                temp_file_name = temp_file.name
-                self.scanned_image.save(temp_file_name, "PNG")
+            if not self.scanned_image.save(temp_file_name, "PNG"):
+                raise Exception("Error al guardar imagen temporal")
 
-            # Abrir imagen con Pillow
-            pil_image = Image.open(temp_file_name)
-            img_width, img_height = pil_image.size
-            
-            # Calcular dimensiones para el PDF (convertir píxeles a puntos)
-            aspect = img_height / float(img_width)
-            # Usar un ancho fijo de 8 pulgadas y ajustar altura proporcionalmente
-            pdf_width = 8 * inch
-            pdf_height = pdf_width * aspect
+            # Abrir y procesar la imagen con PIL
+            with Image.open(temp_file_name) as pil_image:
+                # Obtener dimensiones
+                img_width, img_height = pil_image.size
+                
+                logger.debug(f"Dimensiones originales de imagen: {img_width}x{img_height}")
+                
+                # Calcular dimensiones para el PDF (en puntos)
+                aspect = img_height / float(img_width)
+                
+                # Usar un tamaño fijo de página A4
+                pdf_width = 595  # Ancho A4 en puntos (8.27 × 11.69 pulgadas)
+                pdf_height = pdf_width * aspect
 
-            # Crear el PDF con las dimensiones calculadas
-            c = canvas.Canvas(file_path, pagesize=(pdf_width, pdf_height))
-            # Dibujar la imagen usando todo el espacio disponible
-            c.drawImage(temp_file_name, 0, 0, width=pdf_width, height=pdf_height)
-            c.save()
+                logger.debug(f"Dimensiones calculadas PDF: {pdf_width}x{pdf_height}")
 
-            QMessageBox.information(self, "Éxito", f"El archivo PDF se guardó correctamente en: {file_path}")
+                try:
+                    # Crear el PDF con tamaño personalizado
+                    c = canvas.Canvas(file_path, pagesize=(pdf_width, pdf_height))
+                    
+                    # Dibujar la imagen usando todo el espacio disponible
+                    c.drawImage(temp_file_name, 0, 0, width=pdf_width, height=pdf_height)
+                    c.save()
+                    
+                    logger.info(f"PDF guardado exitosamente en: {file_path}")
+                    QMessageBox.information(self, "Éxito", f"El archivo PDF se guardó correctamente en:\n{file_path}")
+                
+                except Exception as pdf_error:
+                    logger.error(f"Error al crear PDF: {str(pdf_error)}")
+                    QMessageBox.critical(self, "Error", f"Error al crear el PDF: {str(pdf_error)}")
+                    return
+
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo guardar el archivo PDF: {str(e)}")
+            logger.error(f"Error general al guardar PDF: {str(e)}")
+            QMessageBox.critical(self, "Error", f"No se pudo guardar el archivo PDF:\n{str(e)}")
+        
         finally:
-            if temp_file_name and os.path.exists(temp_file_name):
-                os.remove(temp_file_name)
+            # Limpiar archivo temporal
+            try:
+                if temp_file_name and os.path.exists(temp_file_name):
+                    os.remove(temp_file_name)
+                    logger.debug("Archivo temporal eliminado correctamente")
+            except Exception as cleanup_error:
+                logger.error(f"Error al eliminar archivo temporal: {str(cleanup_error)}")
 
     def checkForUpdates(self):
         try:
