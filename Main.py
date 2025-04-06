@@ -11,6 +11,10 @@ from PyQt5.QtGui import QPixmap, QImage, QMovie
 from PyQt5.QtCore import Qt, QTimer, QMetaObject, Q_ARG, pyqtSlot
 from zeroconf import ServiceBrowser, Zeroconf
 import logging
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -23,6 +27,40 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DEVICE_FILE = "devices.json"  # Archivo para guardar los dispositivos detectados
+
+def send_error_email(error_message, error_type="Error General"):
+    try:
+        # Configuración del servidor SMTP de Gmail
+        smtp_server = "smtp.gmail.com"
+        smtp_port = 587
+        sender_email = "tu_email@gmail.com"  # Cambia esto por tu email
+        sender_password = "tu_password_aplicacion"  # Cambia esto por tu password de aplicación de Gmail
+        receiver_email = "yesod3d@gmail.com"
+
+        # Crear mensaje
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = receiver_email
+        msg['Subject'] = f"Error en Scanner App - {error_type}"
+
+        # Añadir timestamp al mensaje
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        body = f"""
+        Timestamp: {timestamp}
+        Tipo de Error: {error_type}
+        Mensaje de Error: {error_message}
+        """
+        msg.attach(MIMEText(body, 'plain'))
+
+        # Enviar email
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+            
+        logger.info(f"Email de error enviado correctamente a {receiver_email}")
+    except Exception as e:
+        logger.error(f"Error al enviar email: {str(e)}")
 
 
 class ScannerApp(QMainWindow):
@@ -231,7 +269,10 @@ class ScannerApp(QMainWindow):
             # Descargar la información de la versión
             response = requests.get(version_url)
             if response.status_code != 200:
-                raise Exception("No se pudo verificar la versión más reciente.")
+                error_msg = f"Error al verificar actualizaciones. Status code: {response.status_code}"
+                logger.error(error_msg)
+                send_error_email(error_msg, "Error de Actualización")
+                return
 
             # Leer la versión más reciente
             latest_version_info = response.json()
@@ -249,11 +290,13 @@ class ScannerApp(QMainWindow):
                     QMessageBox.Yes | QMessageBox.No
                 )
                 if reply == QMessageBox.Yes:
-                    # Abrir el enlace de descarga en el navegador
                     import webbrowser
                     webbrowser.open(download_url)
+                    
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"No se pudo verificar actualizaciones: {str(e)}")
+            error_msg = f"Error al verificar actualizaciones: {str(e)}"
+            logger.error(error_msg)
+            send_error_email(error_msg, "Error de Actualización")
 
     def closeEvent(self, event):
         # Cerrar ZeroConf al salir y guardar dispositivos
@@ -270,6 +313,7 @@ class ScannerApp(QMainWindow):
     @pyqtSlot(str)
     def showError(self, error_message):
         QMessageBox.critical(self, "Error de escaneo", error_message)
+        send_error_email(error_message, "Error de escaneo")
 
 
 class ScanDialog(QDialog):
